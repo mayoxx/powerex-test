@@ -23,3 +23,12 @@ Datovu pipelinu zrealizuj v prostredi AWS MWAA.
 - Login: airflow
 - Password: airflow
 - Port: 5432
+
+## Note
+
+add `schedule=None` to allow manual triggering
+
+    @dag(
+        schedule=None,
+        start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
+      
