@@ -12,3 +12,14 @@ Time, Actual_Temperature, Mean_7_days_Temperature, Std_7_days_Temperature, Actua
 3. Nascheduluj pripravu tychto dvoch tabuliek na kazdych 6 hodin tak aby obsahovali data po update z ecmwf.
 
 Datovu pipelinu zrealizuj v prostredi AWS MWAA.
+
+
+## Connection
+
+- Connection Id: tutorial_pg_conn
+- Connection Type: postgres
+- Host: postgres
+- Schema: airflow
+- Login: airflow
+- Password: airflow
+- Port: 5432
