@@ -24,6 +24,14 @@ Datovu pipelinu zrealizuj v prostredi AWS MWAA.
 - Password: airflow
 - Port: 5432
 
+## Run in docker
+
+    echo -e "AIRFLOW_UID=$(id -u)" > .env
+    AIRFLOW_UID=50000
+    docker compose up airflow-init
+    docker compose build
+    docker compose up
+
 ## Note
 
 add `schedule=None` to allow manual triggering
