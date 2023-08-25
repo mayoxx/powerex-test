@@ -20,6 +20,14 @@ def get_last_7_days():
     cursor = pg_conn.cursor()
     cursor.execute(sql_stmt)
     return cursor.fetchall()
+    
+def get_forecast():
+    sql_stmt = "SELECT * FROM ecmwf WHERE time > CURRENT_TIMESTAMP ORDER BY time ASC;"
+    pg_hook = PostgresHook(postgres_conn_id='tutorial_pg_conn')
+    pg_conn = pg_hook.get_conn()
+    cursor = pg_conn.cursor()
+    cursor.execute(sql_stmt)
+    return cursor.fetchall()
 
 def get_meteo_db():
     sql_stmt = "SELECT * FROM meteo;"
@@ -30,10 +38,11 @@ def get_meteo_db():
     return cursor.fetchall()
     
 @dag(
+    schedule=None,
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
     schedule_interval='0 */6 * * *',
-    tags=["ingestion"],
+    tags=["ingestion"]
 )
 
 def open_meteo_running_avgs():
@@ -93,9 +102,7 @@ def open_meteo_running_avgs():
         We do a GET request, flatten it to get a csv format and dump it onto a disk (data lake in the future).
         The they are pushed into a database. Note that this table is recreated on each run.
         """
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() + relativedelta(months=-1)).strftime("%Y-%m-%d")
-        url = f"https://api.open-meteo.com/v1/ecmwf?latitude=48.1482&longitude=17.1067&hourly=temperature_2m,relativehumidity_2m,rain,windspeed_10m,winddirection_10m&start_date={start_date}&end_date={end_date}"
+        url = f"https://api.open-meteo.com/v1/ecmwf?latitude=48.1482&longitude=17.1067&hourly=temperature_2m,relativehumidity_2m,rain,windspeed_10m,winddirection_10m"
 
         response = requests.request("GET", url)
         json_data = response.json()
@@ -132,7 +139,8 @@ def open_meteo_running_avgs():
         A simple Transform task which takes the data collected from the open-meteo api,
         picks the latest data and adds some calculated statistics.
         """
-        data = get_last_7_days()
+        #data = get_last_7_days()
+        data = get_forecast()
         df = pd.DataFrame(data, columns = ['id', 'time', 'temperature_2m', "relativehumidity_2m", "rain","windspeed_10m", "winddirection_10m"])
         newest = df.iloc[-1]
         df = df.drop('time', axis=1)
