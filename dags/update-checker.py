@@ -31,7 +31,7 @@ def check():
 @dag(
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
-    #schedule_interval='*/1 * * * *',
+    schedule_interval='*/1 * * * *',
     tags=["update"]
 )
 
