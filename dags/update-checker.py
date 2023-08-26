@@ -18,8 +18,8 @@ def check():
 
     old_hash = Variable.get('open-meteo-ecmwf-data-hash', default_var=0)
 
-    logging.info('OLD HASH: ' + old_hash)
-    logging.info('NEW HASH: ' + new_hash)
+    logging.info('OLD HASH: ' + str(old_hash))
+    logging.info('NEW HASH: ' + str(new_hash))
 
     if old_hash != new_hash:
         logging.info('HASHES DIFFER, TRIGGERED UPDATE')

@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import numpy as np
 import logging
 import json
 import pendulum
@@ -7,20 +8,13 @@ import os
 import csv
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from sqlalchemy import create_engine
 
 from airflow.decorators import dag, task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
 
-def get_last_7_days():
-    sql_stmt = "SELECT * FROM ecmwf WHERE time > (CURRENT_TIMESTAMP - INTERVAL '7 days') AND time < CURRENT_TIMESTAMP ORDER BY time ASC;"
-    pg_hook = PostgresHook(postgres_conn_id='tutorial_pg_conn')
-    pg_conn = pg_hook.get_conn()
-    cursor = pg_conn.cursor()
-    cursor.execute(sql_stmt)
-    return cursor.fetchall()
-    
 def get_forecast():
     sql_stmt = "SELECT * FROM ecmwf WHERE time > CURRENT_TIMESTAMP ORDER BY time ASC;"
     pg_hook = PostgresHook(postgres_conn_id='tutorial_pg_conn')
@@ -50,7 +44,7 @@ def open_meteo_running_avgs():
 
     create_ecmwf_table = PostgresOperator(
         task_id="create_ecmwf_table",
-        postgres_conn_id="tutorial_pg_conn",
+        postgres_conn_id=DB_ID,
         sql="""
             DROP TABLE IF EXISTS ecmwf;
             CREATE TABLE IF NOT EXISTS ecmwf (
@@ -66,32 +60,42 @@ def open_meteo_running_avgs():
 
     create_meteo_table = PostgresOperator(
         task_id="create_meteo_table",
-        postgres_conn_id="tutorial_pg_conn",
+        postgres_conn_id=DB_ID,
         sql="""
             DROP TABLE IF EXISTS meteo;
             CREATE TABLE meteo (
                 "id" NUMERIC PRIMARY KEY,
                 "time" TIMESTAMP,
 
-                "actual_temperature" DOUBLE PRECISION,
-                "mean_7_days_temperature" DOUBLE PRECISION,
-                "std_7_days_temperature" DOUBLE PRECISION,
+                "temperature_2m" DOUBLE PRECISION,
+                "mean_rolling_temperature_2m" DOUBLE PRECISION,
+                "mean_moving_temperature_2m" DOUBLE PRECISION,
+                "std_rolling_temperature_2m" DOUBLE PRECISION,
+                "std_moving_temperature_2m" DOUBLE PRECISION,
 
-                "actual_humidity" INTEGER,
-                "mean_7_days_humidity" INTEGER,
-                "std_7_days_humidity" INTEGER,
+                "relativehumidity_2m" INTEGER,
+                "mean_rolling_relativehumidity_2m" INTEGER,
+                "mean_moving_relativehumidity_2m" INTEGER,
+                "std_rolling_relativehumidity_2m" INTEGER,
+                "std_moving_relativehumidity_2m" INTEGER,
 
-                "actual_rain" DOUBLE PRECISION,
-                "mean_7_days_rain" DOUBLE PRECISION,
-                "std_7_days_rain" DOUBLE PRECISION,
+                "rain" DOUBLE PRECISION,
+                "mean_rolling_rain" DOUBLE PRECISION,
+                "mean_moving_rain" DOUBLE PRECISION,
+                "std_rolling_rain" DOUBLE PRECISION,
+                "std_moving_rain" DOUBLE PRECISION,
 
-                "actual_windspeed_10m" DOUBLE PRECISION,
-                "mean_7_days_windspeed_10m" DOUBLE PRECISION,
-                "std_7_days_windspeed_10m" DOUBLE PRECISION,
+                "windspeed_10m" DOUBLE PRECISION,
+                "mean_rolling_windspeed_10m" DOUBLE PRECISION,
+                "mean_moving_windspeed_10m" DOUBLE PRECISION,
+                "std_rolling_windspeed_10m" DOUBLE PRECISION,
+                "std_moving_windspeed_10m" DOUBLE PRECISION,
 
-                "actual_winddirection_10m" INTEGER,
-                "mean_7_days_winddirection_10m" INTEGER,
-                "std_7_days_winddirection_10m" INTEGER
+                "winddirection_10m" INTEGER,
+                "mean_rolling_winddirection_10m" INTEGER,
+                "mean_moving_winddirection_10m" INTEGER,
+                "std_rolling_winddirection_10m" INTEGER,
+                "std_moving_winddirection_10m" INTEGER
             );""",
     )
 
@@ -109,7 +113,7 @@ def open_meteo_running_avgs():
 
         # flatten the data
         values_raw = list(json_data['hourly'].values())
-        values = list(zip(range(1, len(values_raw[0]) + 1), *values_raw))
+        values = list(zip(range(len(values_raw[0])), *values_raw))
         labels = ["id", "time", "temperature_2m", "relativehumidity_2m", "rain", "windspeed_10m", "winddirection_10m"]
 
         # dump into the data lake
@@ -122,7 +126,7 @@ def open_meteo_running_avgs():
             write.writerows(values)
 
         # write into database
-        postgres_hook = PostgresHook(postgres_conn_id="tutorial_pg_conn")
+        postgres_hook = PostgresHook(postgres_conn_id=DB_ID)
         conn = postgres_hook.get_conn()
         cur = conn.cursor()
         with open(data_path, "r") as file:
@@ -139,39 +143,27 @@ def open_meteo_running_avgs():
         A simple Transform task which takes the data collected from the open-meteo api,
         picks the latest data and adds some calculated statistics.
         """
-        #data = get_last_7_days()
         data = get_forecast()
-        df = pd.DataFrame(data, columns = ['id', 'time', 'temperature_2m', "relativehumidity_2m", "rain","windspeed_10m", "winddirection_10m"])
-        newest = df.iloc[-1]
-        df = df.drop('time', axis=1)
-        variances = df.var()
-        means = df.mean()
+        values = ["temperature_2m", "relativehumidity_2m",
+                  "rain", "windspeed_10m", "winddirection_10m"]
 
-        query = f"""
-            INSERT INTO meteo (id,time,
-                               actual_temperature ,mean_7_days_temperature,std_7_days_temperature,
-                               actual_humidity,mean_7_days_humidity,std_7_days_humidity,
-                               actual_rain,mean_7_days_rain,std_7_days_rain,
-                               actual_windspeed_10m,mean_7_days_windspeed_10m,std_7_days_windspeed_10m,
-                               actual_winddirection_10m,mean_7_days_winddirection_10m,std_7_days_winddirection_10m
-                              ) VALUES (
-                               1,'{newest["time"]}',
-                               {newest["temperature_2m"]},{means['temperature_2m']},{variances['temperature_2m']},
-                               {newest["relativehumidity_2m"]},{means["relativehumidity_2m"]},{variances["relativehumidity_2m"]},
-                               {newest["rain"]},{means["rain"]},{variances["rain"]},
-                               {newest["windspeed_10m"]},{means["windspeed_10m"]},{variances["windspeed_10m"]},
-                               {newest["winddirection_10m"]},{means["winddirection_10m"]},{variances["winddirection_10m"]}
-                              );
-        """
-        try:
-            postgres_hook = PostgresHook(postgres_conn_id="tutorial_pg_conn")
-            conn = postgres_hook.get_conn()
-            cur = conn.cursor()
-            cur.execute(query)
-            conn.commit()
-            return 0
-        except Exception as e:
-            return 1
+        df = pd.DataFrame(data, columns=['id', 'time', *values])
+        df = df.drop('id', axis=1)
+
+        n = 4
+        for val in values:
+            df['mean_rolling_' + val] = round(df[val].rolling(
+                n, min_periods=1).mean(), 2)
+            df['mean_moving_' + val] = round(df[val].rolling(
+                df.shape[0], min_periods=1).mean(), 2)
+            df['std_rolling_' + val] = round(df[val].rolling(
+                n, min_periods=1).std(), 2)
+            df['std_moving_' + val] = round(df[val].rolling(
+                df.shape[0], min_periods=1).std(), 2)
+            
+        postgres_hook = PostgresHook(postgres_conn_id=DB_ID)
+        df.to_sql('meteo', postgres_hook.get_sqlalchemy_engine(),
+                  if_exists='replace', chunksize=1000)
 
     @task()
     def load():
@@ -179,12 +171,19 @@ def open_meteo_running_avgs():
         #### Load task
         We just print the content of the database containing the latest measurement and the calculated (rolling mean and variance) data.
         """
-        df = pd.DataFrame(get_meteo_db(), columns = ['id', 'time',
-                'actual_temperature','mean_7_days_temperature','std_7_days_temperature',
-                'actual_humidity','mean_7_days_humidity','std_7_days_humidity',
-                'actual_rain','mean_7_days_rain','std_7_days_rain',
-                'actual_windspeed_10m','mean_7_days_windspeed_10m','std_7_days_windspeed_10m',
-                'actual_winddirection_10m','mean_7_days_winddirection_10m','std_7_days_winddirection_10m'])
+        column_labels = ['id', 'time', 'temperature_2m', 'relativehumidity_2m', 'rain',
+                         'windspeed_10m', 'winddirection_10m', 'mean_rolling_temperature_2m',
+                         'mean_moving_temperature_2m', 'std_rolling_temperature_2m',
+                         'std_moving_temperature_2m', 'mean_rolling_relativehumidity_2m',
+                         'mean_moving_relativehumidity_2m', 'std_rolling_relativehumidity_2m',
+                         'std_moving_relativehumidity_2m', 'mean_rolling_rain',
+                         'mean_moving_rain', 'std_rolling_rain', 'std_moving_rain',
+                         'mean_rolling_windspeed_10m', 'mean_moving_windspeed_10m',
+                         'std_rolling_windspeed_10m', 'std_moving_windspeed_10m',
+                         'mean_rolling_winddirection_10m', 'mean_moving_winddirection_10m',
+                         'std_rolling_winddirection_10m', 'std_moving_winddirection_10m']
+        df = pd.DataFrame(get_meteo_db(), columns=column_labels)
+        df = df.drop('id', axis=1)
         logging.info(df.to_string())
 
     [create_ecmwf_table, create_meteo_table] >> extract() >> transform() >> load()
