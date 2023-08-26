@@ -1,13 +1,9 @@
 import requests
 import pandas as pd
-import numpy as np
 import logging
-import json
 import pendulum
 import os
 import csv
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from sqlalchemy import create_engine
 
 from airflow.decorators import dag, task
